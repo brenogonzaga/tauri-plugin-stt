@@ -1,0 +1,14 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Default permissions for the STT plugin - allows all speech-to-text operations"
+permissions = [
+    "allow-is-available",
+    "allow-get-supported-languages",
+    "allow-check-permission",
+    "allow-request-permission",
+    "allow-start-listening",
+    "allow-stop-listening",
+    "allow-register-listener",
+    "allow-remove-listener",
+]

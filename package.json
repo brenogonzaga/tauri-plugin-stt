@@ -1,0 +1,51 @@
+{
+    "name": "tauri-plugin-stt-api",
+    "version": "0.1.0",
+    "author": "Affex Team",
+    "description": "Speech-to-text recognition API for Tauri with multi-language support",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/brenogonzaga/tauri-plugin-stt.git"
+    },
+    "homepage": "https://github.com/brenogonzaga/tauri-plugin-stt",
+    "bugs": {
+        "url": "https://github.com/brenogonzaga/tauri-plugin-stt/issues"
+    },
+    "keywords": [
+        "tauri",
+        "tauri-plugin",
+        "speech",
+        "recognition",
+        "stt",
+        "vosk",
+        "speech-to-text"
+    ],
+    "type": "module",
+    "types": "./dist-js/index.d.ts",
+    "main": "./dist-js/index.cjs",
+    "module": "./dist-js/index.js",
+    "exports": {
+        "types": "./dist-js/index.d.ts",
+        "import": "./dist-js/index.js",
+        "require": "./dist-js/index.cjs"
+    },
+    "files": [
+        "dist-js",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "rollup -c",
+        "prepublishOnly": "npm run build",
+        "pretest": "npm run build"
+    },
+    "dependencies": {
+        "@tauri-apps/api": "^2.9.1"
+    },
+    "devDependencies": {
+        "@rollup/plugin-typescript": "^12.0.0",
+        "rollup": "^4.9.6",
+        "typescript": "^5.3.3",
+        "tslib": "^2.6.2"
+    }
+}
