@@ -70,9 +70,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Session counter - incremented each time a new listening session starts.
 /// Audio callbacks capture their session ID and only process audio if it matches
-/// the current session. This prevents old streams (kept alive via mem::forget)
-/// from processing audio for new sessions.
+/// the current session. This prevents old audio data from bleeding into new sessions.
 static CURRENT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Shared audio processing state that can be reused across sessions.
+/// This avoids creating new audio streams for each PTT press.
+struct AudioProcessor {
+    /// The audio buffer accumulating samples
+    buffer: Vec<i16>,
+    /// The Vosk recognizer
+    recognizer: Recognizer,
+    /// Last emitted partial result (to avoid duplicates)
+    last_partial: String,
+    /// Whether to emit interim results
+    interim_results: bool,
+    /// Resampling step (1 = no resampling)
+    resample_step: usize,
+}
 
 struct SttState {
     model: Option<Arc<Model>>,
@@ -82,6 +96,10 @@ struct SttState {
     max_duration_ms: Option<u64>,
     /// The session ID of the current listening session (0 = not listening)
     active_session_id: u64,
+    /// Shared audio processor - reused across sessions
+    audio_processor: Option<Arc<Mutex<AudioProcessor>>>,
+    /// Whether the audio stream has been created
+    stream_created: bool,
 }
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
@@ -95,6 +113,8 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
         listen_start_time: None,
         max_duration_ms: None,
         active_session_id: 0,
+        audio_processor: None,
+        stream_created: false,
     }));
 
     Ok(Stt {
@@ -343,6 +363,9 @@ impl<R: Runtime> Stt<R> {
         // Drop existing model if switching
         state.model = None;
         state.current_model_name = None;
+        // Also invalidate the audio processor since it has the old recognizer
+        state.audio_processor = None;
+        state.stream_created = false;
 
         drop(state);
 
@@ -377,7 +400,7 @@ impl<R: Runtime> Stt<R> {
             return Err(crate::Error::Recording("Already listening".to_string()));
         }
 
-        // Generate a new session ID - this invalidates any previous audio callbacks
+        // Generate a new session ID
         let session_id = CURRENT_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
         state.active_session_id = session_id;
 
@@ -389,117 +412,119 @@ impl<R: Runtime> Stt<R> {
             None
         };
 
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| crate::Error::Recording("No input device available".to_string()))?;
-
-        let stream_config = device
-            .default_input_config()
-            .map_err(|e| crate::Error::Recording(format!("Failed to get input config: {}", e)))?;
-
-        let channels = stream_config.channels() as usize;
-        let sample_format = stream_config.sample_format();
-        let device_sample_rate = stream_config.sample_rate().0 as f32;
-
-        // Vosk expects 16kHz
-        let target_sample_rate = 16000.0;
-        let mut recognizer = Recognizer::new(&model, target_sample_rate)
-            .ok_or_else(|| crate::Error::Recording("Failed to create recognizer".to_string()))?;
-
-        recognizer.set_max_alternatives(config.max_alternatives.unwrap_or(1) as u16);
-        recognizer.set_partial_words(config.interim_results);
-
-        let app_handle = self.app.clone();
-        let recognizer = Arc::new(Mutex::new(recognizer));
-        let recognizer_clone = recognizer.clone();
         let interim_results = config.interim_results;
-        let last_partial = Arc::new(Mutex::new(String::new()));
 
-        // Accumulator buffer to collect audio samples
-        let audio_buffer = Arc::new(Mutex::new(Vec::new()));
+        // Check if we need to create a new stream or can reuse existing one
+        let need_new_stream = !state.stream_created || state.audio_processor.is_none();
 
-        // Simple resampling: skip samples if device rate > 16kHz
-        let resample_step = (device_sample_rate / target_sample_rate) as usize;
-        let resample_step = resample_step.max(1);
+        if need_new_stream {
+            // Create new audio processor and stream
+            let host = cpal::default_host();
+            let device = host
+                .default_input_device()
+                .ok_or_else(|| crate::Error::Recording("No input device available".to_string()))?;
 
-        // Capture the session ID for this callback - it will only process audio
-        // if this matches the current session ID
-        let callback_session_id = session_id;
+            let stream_config = device
+                .default_input_config()
+                .map_err(|e| crate::Error::Recording(format!("Failed to get input config: {}", e)))?;
 
-        let process_audio = move |samples_i16: Vec<i16>| {
-            // Check if this callback's session is still the active one
-            // If not, skip processing (a new session has started)
-            if CURRENT_SESSION_ID.load(Ordering::SeqCst) != callback_session_id {
-                return;
-            }
+            let channels = stream_config.channels() as usize;
+            let sample_format = stream_config.sample_format();
+            let device_sample_rate = stream_config.sample_rate().0 as f32;
 
-            // Accumulate samples in buffer
-            let mut buffer = audio_buffer.lock().unwrap();
-            buffer.extend_from_slice(&samples_i16);
+            // Vosk expects 16kHz
+            let target_sample_rate = 16000.0;
+            let mut recognizer = Recognizer::new(&model, target_sample_rate)
+                .ok_or_else(|| crate::Error::Recording("Failed to create recognizer".to_string()))?;
 
-            // Process when we have at least 0.1 seconds of audio after resampling
-            // At 16kHz, 0.1s = 1600 samples, but we want at least that much
-            let required_samples = (1600 * resample_step).max(3200);
+            recognizer.set_max_alternatives(config.max_alternatives.unwrap_or(1) as u16);
+            recognizer.set_partial_words(interim_results);
 
-            if buffer.len() < required_samples {
-                return;
-            }
+            // Simple resampling: skip samples if device rate > 16kHz
+            let resample_step = (device_sample_rate / target_sample_rate) as usize;
+            let resample_step = resample_step.max(1);
 
-            // Take all accumulated samples
-            let samples_to_process: Vec<i16> = buffer.drain(..).collect();
-            drop(buffer); // Release lock
+            let audio_processor = Arc::new(Mutex::new(AudioProcessor {
+                buffer: Vec::new(),
+                recognizer,
+                last_partial: String::new(),
+                interim_results,
+                resample_step,
+            }));
 
-            // Resample if needed
-            let resampled: Vec<i16> = if resample_step > 1 {
-                samples_to_process
-                    .iter()
-                    .step_by(resample_step)
-                    .copied()
-                    .collect()
-            } else {
-                samples_to_process
-            };
+            state.audio_processor = Some(audio_processor.clone());
 
-            let mut rec = recognizer_clone.lock().unwrap();
+            let app_handle = self.app.clone();
+            let processor_for_callback = audio_processor.clone();
 
-            // Accept waveform returns Result<DecodingState, _>
-            let result = rec.accept_waveform(&resampled);
-            let is_final = matches!(result, Ok(vosk::DecodingState::Finalized));
+            let process_audio = move |samples_i16: Vec<i16>| {
+                // Check if this callback's session is still the active one
+                let current_session = CURRENT_SESSION_ID.load(Ordering::SeqCst);
+                if current_session == 0 {
+                    // Session ID 0 means not listening - skip processing
+                    return;
+                }
 
-            if is_final {
-                let result = rec.result();
-                let text = match result {
-                    vosk::CompleteResult::Single(single) => single.text,
-                    vosk::CompleteResult::Multiple(multiple) => multiple
-                        .alternatives
-                        .first()
-                        .map(|alt| &alt.text)
-                        .unwrap_or(&""),
+                let mut processor = processor_for_callback.lock().unwrap();
+
+                // Accumulate samples in buffer
+                processor.buffer.extend_from_slice(&samples_i16);
+
+                // Process when we have at least 0.1 seconds of audio after resampling
+                let required_samples = (1600 * processor.resample_step).max(3200);
+
+                if processor.buffer.len() < required_samples {
+                    return;
+                }
+
+                // Take all accumulated samples
+                let samples_to_process: Vec<i16> = processor.buffer.drain(..).collect();
+
+                // Resample if needed
+                let resampled: Vec<i16> = if processor.resample_step > 1 {
+                    samples_to_process
+                        .iter()
+                        .step_by(processor.resample_step)
+                        .copied()
+                        .collect()
+                } else {
+                    samples_to_process
                 };
 
-                if !text.is_empty() {
-                    *last_partial.lock().unwrap() = String::new();
+                // Accept waveform returns Result<DecodingState, _>
+                let result = processor.recognizer.accept_waveform(&resampled);
+                let is_final = matches!(result, Ok(vosk::DecodingState::Finalized));
 
-                    // Emit both event names for compatibility
-                    let result = RecognitionResult {
-                        transcript: text.to_string(),
-                        is_final: true,
-                        confidence: Some(1.0),
+                if is_final {
+                    let result = processor.recognizer.result();
+                    let text = match result {
+                        vosk::CompleteResult::Single(single) => single.text.to_string(),
+                        vosk::CompleteResult::Multiple(multiple) => multiple
+                            .alternatives
+                            .first()
+                            .map(|alt| alt.text.to_string())
+                            .unwrap_or_default(),
                     };
-                    let _ = app_handle.emit("stt://result", &result);
-                    let _ = app_handle.emit("plugin:stt:result", &result);
-                }
-            } else if interim_results {
-                let partial = rec.partial_result();
-                if !partial.partial.is_empty() {
-                    let mut last = last_partial.lock().unwrap();
-                    if *last != partial.partial {
-                        *last = partial.partial.to_string();
 
-                        // Emit both event names for compatibility
+                    if !text.is_empty() {
+                        processor.last_partial = String::new();
+
                         let result = RecognitionResult {
-                            transcript: partial.partial.to_string(),
+                            transcript: text,
+                            is_final: true,
+                            confidence: Some(1.0),
+                        };
+                        let _ = app_handle.emit("stt://result", &result);
+                        let _ = app_handle.emit("plugin:stt:result", &result);
+                    }
+                } else if processor.interim_results {
+                    let partial = processor.recognizer.partial_result();
+                    let partial_text = partial.partial.to_string();
+                    if !partial_text.is_empty() && processor.last_partial != partial_text {
+                        processor.last_partial = partial_text.clone();
+
+                        let result = RecognitionResult {
+                            transcript: partial_text,
                             is_final: false,
                             confidence: None,
                         };
@@ -507,85 +532,112 @@ impl<R: Runtime> Stt<R> {
                         let _ = app_handle.emit("plugin:stt:result", &result);
                     }
                 }
-            }
-        };
+            };
 
-        let stream = match sample_format {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &stream_config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mono_i16: Vec<i16> = if channels == 1 {
-                        data.iter()
-                            .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
-                            .collect()
-                    } else {
-                        data.chunks(channels)
-                            .map(|frame| {
-                                let avg = frame.iter().sum::<f32>() / channels as f32;
-                                (avg.clamp(-1.0, 1.0) * 32767.0) as i16
-                            })
-                            .collect()
-                    };
-                    process_audio(mono_i16);
-                },
-                move |err| {
-                    eprintln!("Audio stream error: {}", err);
-                },
-                None,
-            ),
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                &stream_config.into(),
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let mono_i16: Vec<i16> = if channels == 1 {
-                        data.to_vec()
-                    } else {
-                        data.chunks(channels)
-                            .map(|frame| {
-                                let sum: i32 = frame.iter().map(|&s| s as i32).sum();
-                                (sum / channels as i32) as i16
-                            })
-                            .collect()
-                    };
-                    process_audio(mono_i16);
-                },
-                move |err| {
-                    eprintln!("Audio stream error: {}", err);
-                },
-                None,
-            ),
-            cpal::SampleFormat::U16 => device.build_input_stream(
-                &stream_config.into(),
-                move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                    let mono_i16: Vec<i16> = if channels == 1 {
-                        data.iter().map(|&s| (s as i32 - 32768) as i16).collect()
-                    } else {
-                        data.chunks(channels)
-                            .map(|frame| {
-                                let avg =
-                                    frame.iter().map(|&s| s as i32).sum::<i32>() / channels as i32;
-                                (avg - 32768) as i16
-                            })
-                            .collect()
-                    };
-                    process_audio(mono_i16);
-                },
-                move |err| {
-                    eprintln!("Audio stream error: {}", err);
-                },
-                None,
-            ),
-            _ => {
-                return Err(crate::Error::Recording(format!(
-                    "Unsupported sample format: {:?}",
-                    sample_format
-                )));
+            let stream = match sample_format {
+                cpal::SampleFormat::F32 => device.build_input_stream(
+                    &stream_config.into(),
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        let mono_i16: Vec<i16> = if channels == 1 {
+                            data.iter()
+                                .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+                                .collect()
+                        } else {
+                            data.chunks(channels)
+                                .map(|frame| {
+                                    let avg = frame.iter().sum::<f32>() / channels as f32;
+                                    (avg.clamp(-1.0, 1.0) * 32767.0) as i16
+                                })
+                                .collect()
+                        };
+                        process_audio(mono_i16);
+                    },
+                    move |err| {
+                        eprintln!("Audio stream error: {}", err);
+                    },
+                    None,
+                ),
+                cpal::SampleFormat::I16 => device.build_input_stream(
+                    &stream_config.into(),
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        let mono_i16: Vec<i16> = if channels == 1 {
+                            data.to_vec()
+                        } else {
+                            data.chunks(channels)
+                                .map(|frame| {
+                                    let sum: i32 = frame.iter().map(|&s| s as i32).sum();
+                                    (sum / channels as i32) as i16
+                                })
+                                .collect()
+                        };
+                        process_audio(mono_i16);
+                    },
+                    move |err| {
+                        eprintln!("Audio stream error: {}", err);
+                    },
+                    None,
+                ),
+                cpal::SampleFormat::U16 => device.build_input_stream(
+                    &stream_config.into(),
+                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        let mono_i16: Vec<i16> = if channels == 1 {
+                            data.iter().map(|&s| (s as i32 - 32768) as i16).collect()
+                        } else {
+                            data.chunks(channels)
+                                .map(|frame| {
+                                    let avg =
+                                        frame.iter().map(|&s| s as i32).sum::<i32>() / channels as i32;
+                                    (avg - 32768) as i16
+                                })
+                                .collect()
+                        };
+                        process_audio(mono_i16);
+                    },
+                    move |err| {
+                        eprintln!("Audio stream error: {}", err);
+                    },
+                    None,
+                ),
+                _ => {
+                    return Err(crate::Error::Recording(format!(
+                        "Unsupported sample format: {:?}",
+                        sample_format
+                    )));
+                }
+            }
+            .map_err(|e| crate::Error::Recording(format!("Failed to build stream: {}", e)))?;
+
+            stream
+                .play()
+                .map_err(|e| crate::Error::Recording(format!("Failed to start stream: {}", e)))?;
+
+            state.stream_created = true;
+
+            // Keep the stream alive using mem::forget
+            // The stream callback checks the session ID and only processes audio
+            // when a session is active (session_id != 0)
+            std::mem::forget(stream);
+        } else {
+            // Reuse existing stream - just reset the audio processor state
+            if let Some(processor) = &state.audio_processor {
+                let mut proc = processor.lock().unwrap();
+                // Clear accumulated audio buffer from previous session
+                proc.buffer.clear();
+                // Clear last partial to avoid duplicate detection issues
+                proc.last_partial.clear();
+                // Reset the recognizer to clear any accumulated state
+                // Note: Vosk doesn't have a reset method, so we create a new one
+                let target_sample_rate = 16000.0;
+                if let Some(ref model) = state.model {
+                    if let Some(mut new_recognizer) = Recognizer::new(model, target_sample_rate) {
+                        new_recognizer.set_max_alternatives(config.max_alternatives.unwrap_or(1) as u16);
+                        new_recognizer.set_partial_words(interim_results);
+                        proc.recognizer = new_recognizer;
+                    }
+                }
+                proc.interim_results = interim_results;
             }
         }
-        .map_err(|e| crate::Error::Recording(format!("Failed to build stream: {}", e)))?;
-
-        stream
-            .play()
-            .map_err(|e| crate::Error::Recording(format!("Failed to start stream: {}", e)))?;
 
         state.is_listening = true;
 
@@ -599,15 +651,7 @@ impl<R: Runtime> Stt<R> {
             },
         );
 
-        // Keep the stream alive using mem::forget
-        // The stream callback checks the session ID and stops processing when
-        // a new session starts or stop_listening is called.
-        // Note: This is a tradeoff - we can't properly drop the stream because
-        // cpal::Stream is not Send+Sync, but the callback will stop processing
-        // when the session ID no longer matches.
-        std::mem::forget(stream);
-
-        // Start maxDuration timer thread if configured (config.max_duration is in milliseconds)
+        // Start maxDuration timer thread if configured
         if config.max_duration > 0 {
             let max_ms = config.max_duration as u64;
             let app_handle_timer = self.app.clone();
@@ -619,16 +663,22 @@ impl<R: Runtime> Stt<R> {
                 // Check if this timer's session is still active
                 let mut state = state_clone.lock().unwrap();
                 if state.is_listening && state.active_session_id == timer_session_id {
-                    // Invalidate the session so callbacks stop processing
-                    CURRENT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+                    // Set session to 0 to stop audio processing
+                    CURRENT_SESSION_ID.store(0, Ordering::SeqCst);
                     state.is_listening = false;
                     state.listen_start_time = None;
                     state.max_duration_ms = None;
                     state.active_session_id = 0;
 
                     // Emit events
-                    let _ = app_handle_timer
-                        .emit("stt://stateChange", serde_json::json!({ "state": "idle" }));
+                    let _ = app_handle_timer.emit(
+                        "plugin:stt:stateChange",
+                        RecognitionStatus {
+                            state: RecognitionState::Idle,
+                            is_available: true,
+                            language: None,
+                        },
+                    );
                     let _ = app_handle_timer.emit(
                         "stt://error",
                         serde_json::json!({
@@ -650,9 +700,9 @@ impl<R: Runtime> Stt<R> {
             return Ok(());
         }
 
-        // Invalidate the current session by incrementing the global counter
-        // This causes the audio callback to stop processing immediately
-        CURRENT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+        // Set session to 0 to signal audio callback to stop processing
+        // (but the stream itself keeps running for reuse)
+        CURRENT_SESSION_ID.store(0, Ordering::SeqCst);
 
         state.is_listening = false;
         state.listen_start_time = None;
