@@ -66,10 +66,13 @@ const AVAILABLE_MODELS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Stop signal for the audio stream - when set to true, the audio callback will stop
-static STOP_SIGNAL: AtomicBool = AtomicBool::new(false);
+/// Session counter - incremented each time a new listening session starts.
+/// Audio callbacks capture their session ID and only process audio if it matches
+/// the current session. This prevents old streams (kept alive via mem::forget)
+/// from processing audio for new sessions.
+static CURRENT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
 struct SttState {
     model: Option<Arc<Model>>,
@@ -77,6 +80,8 @@ struct SttState {
     is_listening: bool,
     listen_start_time: Option<Instant>,
     max_duration_ms: Option<u64>,
+    /// The session ID of the current listening session (0 = not listening)
+    active_session_id: u64,
 }
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
@@ -89,6 +94,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
         is_listening: false,
         listen_start_time: None,
         max_duration_ms: None,
+        active_session_id: 0,
     }));
 
     Ok(Stt {
@@ -371,6 +377,10 @@ impl<R: Runtime> Stt<R> {
             return Err(crate::Error::Recording("Already listening".to_string()));
         }
 
+        // Generate a new session ID - this invalidates any previous audio callbacks
+        let session_id = CURRENT_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
+        state.active_session_id = session_id;
+
         // Store maxDuration config (in milliseconds)
         state.listen_start_time = Some(Instant::now());
         state.max_duration_ms = if config.max_duration > 0 {
@@ -413,12 +423,14 @@ impl<R: Runtime> Stt<R> {
         let resample_step = (device_sample_rate / target_sample_rate) as usize;
         let resample_step = resample_step.max(1);
 
-        // Reset stop signal before starting
-        STOP_SIGNAL.store(false, Ordering::SeqCst);
+        // Capture the session ID for this callback - it will only process audio
+        // if this matches the current session ID
+        let callback_session_id = session_id;
 
         let process_audio = move |samples_i16: Vec<i16>| {
-            // Check stop signal - if set, skip processing
-            if STOP_SIGNAL.load(Ordering::SeqCst) {
+            // Check if this callback's session is still the active one
+            // If not, skip processing (a new session has started)
+            if CURRENT_SESSION_ID.load(Ordering::SeqCst) != callback_session_id {
                 return;
             }
 
@@ -575,9 +587,6 @@ impl<R: Runtime> Stt<R> {
             .play()
             .map_err(|e| crate::Error::Recording(format!("Failed to start stream: {}", e)))?;
 
-        // Reset stop signal
-        STOP_SIGNAL.store(false, Ordering::SeqCst);
-
         state.is_listening = true;
 
         // Emit stateChange event with RecognitionStatus
@@ -591,11 +600,11 @@ impl<R: Runtime> Stt<R> {
         );
 
         // Keep the stream alive using mem::forget
-        // The stream callback checks STOP_SIGNAL and stops processing when it's set
-        // This is intentional - the stream stays alive until app exit, but stops
-        // processing audio when stop_listening is called
+        // The stream callback checks the session ID and stops processing when
+        // a new session starts or stop_listening is called.
         // Note: This is a tradeoff - we can't properly drop the stream because
         // cpal::Stream is not Send+Sync, but the callback will stop processing
+        // when the session ID no longer matches.
         std::mem::forget(stream);
 
         // Start maxDuration timer thread if configured (config.max_duration is in milliseconds)
@@ -603,17 +612,19 @@ impl<R: Runtime> Stt<R> {
             let max_ms = config.max_duration as u64;
             let app_handle_timer = self.app.clone();
             let state_clone = self.state.clone();
+            let timer_session_id = session_id;
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(max_ms));
 
-                // Check if still listening before triggering timeout
+                // Check if this timer's session is still active
                 let mut state = state_clone.lock().unwrap();
-                if state.is_listening {
-                    // Stop listening
-                    STOP_SIGNAL.store(true, Ordering::SeqCst);
+                if state.is_listening && state.active_session_id == timer_session_id {
+                    // Invalidate the session so callbacks stop processing
+                    CURRENT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
                     state.is_listening = false;
                     state.listen_start_time = None;
                     state.max_duration_ms = None;
+                    state.active_session_id = 0;
 
                     // Emit events
                     let _ = app_handle_timer
@@ -639,13 +650,24 @@ impl<R: Runtime> Stt<R> {
             return Ok(());
         }
 
-        // Signal the stream thread to stop - this will cause the thread to exit
-        // and drop the stream, which stops the audio capture
-        STOP_SIGNAL.store(true, Ordering::SeqCst);
+        // Invalidate the current session by incrementing the global counter
+        // This causes the audio callback to stop processing immediately
+        CURRENT_SESSION_ID.fetch_add(1, Ordering::SeqCst);
 
         state.is_listening = false;
         state.listen_start_time = None;
         state.max_duration_ms = None;
+        state.active_session_id = 0;
+
+        // Emit stateChange event
+        let _ = self.app.emit(
+            "plugin:stt:stateChange",
+            RecognitionStatus {
+                state: RecognitionState::Idle,
+                is_available: true,
+                language: None,
+            },
+        );
 
         Ok(())
     }
