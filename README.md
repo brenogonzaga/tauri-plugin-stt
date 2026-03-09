@@ -103,22 +103,40 @@ For granular permissions, you can specify individual commands:
 }
 ```
 
-For granular permissions, you can specify individual commands:
+### iOS Configuration (Required)
+
+For iOS apps, you **must** create an `Info.plist` file in your `src-tauri` directory with permission descriptions:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app needs access to the microphone for speech recognition.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>This app needs access to speech recognition to convert your voice to text.</string>
+</dict>
+</plist>
+```
+
+Then reference it in your `tauri.conf.json`:
 
 ```json
 {
-  "permissions": [
-    "stt:allow-is-available",
-    "stt:allow-get-supported-languages",
-    "stt:allow-check-permission",
-    "stt:allow-request-permission",
-    "stt:allow-start-listening",
-    "stt:allow-stop-listening",
-    "stt:allow-register-listener",
-    "stt:allow-remove-listener"
-  ]
+  "bundle": {
+    "iOS": {
+      "infoPlist": "Info.plist"
+    }
+  }
 }
 ```
+
+**Note:** Without these permission descriptions, the app will crash when requesting permissions on iOS.
+
+### Android Configuration
+
+Android permissions are automatically included from the plugin's `AndroidManifest.xml`. No additional configuration needed.
 
 ### Vosk Library (Desktop Only)
 
@@ -168,7 +186,7 @@ const result = await isAvailable();
 const languages = await getSupportedLanguages();
 
 // Listen for results
-const resultListener = await onResult(result => {
+const resultListener = await onResult((result) => {
   console.log("Recognized:", result.transcript, result.isFinal);
 });
 
@@ -178,7 +196,7 @@ const downloadListener = await listen<{
   status: string;
   model: string;
   progress: number;
-}>("stt://download-progress", event => {
+}>("stt://download-progress", (event) => {
   console.log(`${event.payload.status}: ${event.payload.progress}%`);
 });
 
@@ -210,17 +228,17 @@ interface ListenConfig {
 
 ```typescript
 // Listen for results
-const unlistenResult = await onResult(result => {
+const unlistenResult = await onResult((result) => {
   console.log(result.transcript, result.isFinal);
 });
 
 // Listen for state changes
-const unlistenState = await onStateChange(event => {
+const unlistenState = await onStateChange((event) => {
   console.log("State:", event.state); // "idle" | "listening" | "processing"
 });
 
 // Listen for errors
-const unlistenError = await onError(error => {
+const unlistenError = await onError((error) => {
   console.error(`[${error.code}] ${error.message}`);
 });
 
@@ -451,7 +469,7 @@ await startListening();
 ```typescript
 import { listen } from "@tauri-apps/api/event";
 
-const unlisten = await listen("stt://download-progress", event => {
+const unlisten = await listen("stt://download-progress", (event) => {
   console.log(`${event.payload.status}: ${event.payload.progress}%`);
 });
 ```
