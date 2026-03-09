@@ -1,6 +1,6 @@
 {
     "name": "tauri-plugin-stt-api",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "author": "Affex Team",
     "description": "Speech-to-text recognition API for Tauri with multi-language support",
     "license": "MIT",
