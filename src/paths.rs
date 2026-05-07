@@ -7,17 +7,18 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::error::Error;
 
-/// Default subdirectory for Vosk models within app_data_dir
-const MODELS_SUBDIR: &str = "vosk-models";
+/// Default subdirectory for Whisper GGML models within app_data_dir
+const MODELS_SUBDIR: &str = "whisper-models";
 
-/// Gets the models directory for Vosk speech recognition models.
+/// Gets the models directory for Whisper speech recognition models.
 ///
-/// Uses `app_data_dir()` as base directory - these are large files that should persist.
+/// Uses `app_data_dir()` as base directory — these are large files
+/// (75 MB – 3 GB) that should persist across app updates.
 ///
 /// # Example
 /// ```rust,ignore
 /// let models_dir = get_models_dir(&app)?;
-/// let model_path = models_dir.join("vosk-model-en-us-0.22");
+/// let model_path = models_dir.join("ggml-base.bin");
 /// ```
 #[allow(dead_code)]
 pub fn get_models_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, Error> {
@@ -39,11 +40,11 @@ pub fn get_models_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, Error> 
     Ok(full_path)
 }
 
-/// Gets a specific model's directory.
+/// Gets a specific model's path.
 ///
 /// # Arguments
 /// * `app` - The Tauri app handle
-/// * `model_name` - Name of the model (e.g., "vosk-model-en-us-0.22")
+/// * `model_name` - Name of the model file (e.g., "ggml-base.bin")
 #[allow(dead_code)]
 pub fn get_model_path<R: Runtime>(app: &AppHandle<R>, model_name: &str) -> Result<PathBuf, Error> {
     validate_path(model_name)?;
@@ -51,14 +52,17 @@ pub fn get_model_path<R: Runtime>(app: &AppHandle<R>, model_name: &str) -> Resul
     Ok(models_dir.join(model_name))
 }
 
-/// Checks if a model exists in the models directory.
+/// Checks if a model file exists in the models directory.
 #[allow(dead_code)]
 pub fn model_exists<R: Runtime>(app: &AppHandle<R>, model_name: &str) -> Result<bool, Error> {
     let model_path = get_model_path(app, model_name)?;
-    Ok(model_path.exists() && model_path.is_dir())
+    // Whisper models are single `.bin` files, not directories.
+    Ok(model_path.exists() && model_path.is_file())
 }
 
-/// Lists available models in the models directory.
+/// Lists available model files in the models directory. Returns the
+/// raw filenames (`ggml-base.bin`, etc.); callers can match them
+/// against the catalogue surfaced by `list_models`.
 #[allow(dead_code)]
 pub fn list_available_models<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<String>, Error> {
     let models_dir = get_models_dir(app)?;
@@ -67,9 +71,12 @@ pub fn list_available_models<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Strin
     if let Ok(entries) = std::fs::read_dir(&models_dir) {
         for entry in entries.flatten() {
             if let Ok(metadata) = entry.metadata() {
-                if metadata.is_dir() {
+                // Whisper models are single `.bin` files.
+                if metadata.is_file() {
                     if let Some(name) = entry.file_name().to_str() {
-                        models.push(name.to_string());
+                        if name.ends_with(".bin") {
+                            models.push(name.to_string());
+                        }
                     }
                 }
             }

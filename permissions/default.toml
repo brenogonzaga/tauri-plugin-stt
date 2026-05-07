@@ -11,4 +11,8 @@ permissions = [
     "allow-stop-listening",
     "allow-register-listener",
     "allow-remove-listener",
+    "allow-list-models",
+    "allow-install-model",
+    "allow-remove-model",
+    "allow-set-active-model",
 ]

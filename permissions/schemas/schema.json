@@ -343,6 +343,18 @@
           "markdownDescription": "Denies the get_supported_languages command without any pre-configured scope."
         },
         {
+          "description": "Enables the install_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-install-model",
+          "markdownDescription": "Enables the install_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the install_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-install-model",
+          "markdownDescription": "Denies the install_model command without any pre-configured scope."
+        },
+        {
           "description": "Enables the is_available command without any pre-configured scope.",
           "type": "string",
           "const": "allow-is-available",
@@ -365,6 +377,18 @@
           "type": "string",
           "const": "deny-is-available",
           "markdownDescription": "Denies the is_available command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-models",
+          "markdownDescription": "Enables the list_models command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_models command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-models",
+          "markdownDescription": "Denies the list_models command without any pre-configured scope."
         },
         {
           "description": "Enables the register_listener command without any pre-configured scope.",
@@ -391,6 +415,18 @@
           "markdownDescription": "Denies the remove_listener command without any pre-configured scope."
         },
         {
+          "description": "Enables the remove_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-model",
+          "markdownDescription": "Enables the remove_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-model",
+          "markdownDescription": "Denies the remove_model command without any pre-configured scope."
+        },
+        {
           "description": "Enables the request_permission command without any pre-configured scope.",
           "type": "string",
           "const": "allow-request-permission",
@@ -413,6 +449,18 @@
           "type": "string",
           "const": "deny-request-permission",
           "markdownDescription": "Denies the request_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_active_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-active-model",
+          "markdownDescription": "Enables the set_active_model command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_active_model command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-active-model",
+          "markdownDescription": "Denies the set_active_model command without any pre-configured scope."
         },
         {
           "description": "Enables the start_listening command without any pre-configured scope.",
@@ -463,10 +511,10 @@
           "markdownDescription": "Denies the stop_listening command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the STT plugin - allows all speech-to-text operations\n#### This default permission set includes:\n\n- `allow-is-available`\n- `allow-get-supported-languages`\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-start-listening`\n- `allow-stop-listening`\n- `allow-register-listener`\n- `allow-remove-listener`",
+          "description": "Default permissions for the STT plugin - allows all speech-to-text operations\n#### This default permission set includes:\n\n- `allow-is-available`\n- `allow-get-supported-languages`\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-start-listening`\n- `allow-stop-listening`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-list-models`\n- `allow-install-model`\n- `allow-remove-model`\n- `allow-set-active-model`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the STT plugin - allows all speech-to-text operations\n#### This default permission set includes:\n\n- `allow-is-available`\n- `allow-get-supported-languages`\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-start-listening`\n- `allow-stop-listening`\n- `allow-register-listener`\n- `allow-remove-listener`"
+          "markdownDescription": "Default permissions for the STT plugin - allows all speech-to-text operations\n#### This default permission set includes:\n\n- `allow-is-available`\n- `allow-get-supported-languages`\n- `allow-check-permission`\n- `allow-request-permission`\n- `allow-start-listening`\n- `allow-stop-listening`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-list-models`\n- `allow-install-model`\n- `allow-remove-model`\n- `allow-set-active-model`"
         }
       ]
     }

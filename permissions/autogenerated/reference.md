@@ -12,6 +12,10 @@ Default permissions for the STT plugin - allows all speech-to-text operations
 - `allow-stop-listening`
 - `allow-register-listener`
 - `allow-remove-listener`
+- `allow-list-models`
+- `allow-install-model`
+- `allow-remove-model`
+- `allow-set-active-model`
 
 ## Permission Table
 
@@ -129,6 +133,32 @@ Denies the get_supported_languages command without any pre-configured scope.
 <tr>
 <td>
 
+`stt:allow-install-model`
+
+</td>
+<td>
+
+Enables the install_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`stt:deny-install-model`
+
+</td>
+<td>
+
+Denies the install_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `stt:allow-is-available`
 
 </td>
@@ -174,6 +204,32 @@ Enables the is_available command without any pre-configured scope.
 <td>
 
 Denies the is_available command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`stt:allow-list-models`
+
+</td>
+<td>
+
+Enables the list_models command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`stt:deny-list-models`
+
+</td>
+<td>
+
+Denies the list_models command without any pre-configured scope.
 
 </td>
 </tr>
@@ -233,6 +289,32 @@ Denies the remove_listener command without any pre-configured scope.
 <tr>
 <td>
 
+`stt:allow-remove-model`
+
+</td>
+<td>
+
+Enables the remove_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`stt:deny-remove-model`
+
+</td>
+<td>
+
+Denies the remove_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `stt:allow-request-permission`
 
 </td>
@@ -278,6 +360,32 @@ Enables the request_permission command without any pre-configured scope.
 <td>
 
 Denies the request_permission command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`stt:allow-set-active-model`
+
+</td>
+<td>
+
+Enables the set_active_model command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`stt:deny-set-active-model`
+
+</td>
+<td>
+
+Denies the set_active_model command without any pre-configured scope.
 
 </td>
 </tr>

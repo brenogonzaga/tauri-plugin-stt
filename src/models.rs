@@ -144,8 +144,10 @@ pub struct SupportedLanguagesResponse {
 /// Unified error codes for cross-platform consistency
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Default)]
 pub enum SttErrorCode {
     /// No error
+    #[default]
     None,
     /// Speech recognition service not available
     NotAvailable,
@@ -171,14 +173,10 @@ pub enum SttErrorCode {
     NotListening,
     /// Service busy
     Busy,
+    /// No Whisper model has been downloaded yet
+    ModelNotInstalled,
     /// Unknown error
     Unknown,
-}
-
-impl Default for SttErrorCode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl SttErrorCode {
@@ -198,6 +196,7 @@ impl SttErrorCode {
             Self::AlreadyListening => "Already listening for speech",
             Self::NotListening => "Not currently listening",
             Self::Busy => "Speech recognition service is busy",
+            Self::ModelNotInstalled => "No speech recognition model has been downloaded",
             Self::Unknown => "An unknown error occurred",
         }
     }
@@ -218,6 +217,7 @@ impl SttErrorCode {
             Self::AlreadyListening => -10,
             Self::NotListening => -11,
             Self::Busy => -12,
+            Self::ModelNotInstalled => -13,
             Self::Unknown => -99,
         }
     }
@@ -234,6 +234,65 @@ pub struct SttError {
     /// Platform-specific error details (optional)
     #[serde(default)]
     pub details: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperModelInfo {
+    /// Stable identifier (`tiny`, `tiny.en`, `base`, `base.en`,
+    /// `small`, `small.en`, `medium`, `medium.en`, `large-v3`).
+    pub id: String,
+    /// Human-readable name shown in the model manager.
+    pub display_name: String,
+    /// Approximate on-disk size in megabytes — used for confirmation
+    /// dialogs ("Download 142 MB?") and for the disk-usage summary.
+    pub size_mb: u32,
+    /// Approximate working-set memory in megabytes (whisper.cpp's
+    /// published "required memory" — covers RAM on CPU, VRAM on GPU).
+    /// Drives the "your device has only X MB" gate so we never let
+    /// a user download a model their machine can't actually run.
+    pub required_memory_mb: u32,
+    /// Whether the binary is currently present in `app_data_dir`.
+    pub installed: bool,
+    /// Whether this model is the one `start_listening` will load.
+    pub active: bool,
+    /// Marks the suggested default for first-time users. Exactly one
+    /// model in the catalogue carries this flag.
+    pub recommended: bool,
+    /// Short qualitative label for the speed ↔ accuracy trade-off,
+    /// e.g. `"fastest"`, `"balanced"`, `"most accurate"`. Lets the UI
+    /// stay in sync with the catalogue without owning copy.
+    pub tier: String,
+    /// `Some("en")` for English-optimised variants (`*.en`), `None`
+    /// for the multilingual default models. The frontend prefers an
+    /// `.en` variant when the course's declared language is English.
+    #[serde(default)]
+    pub language: Option<String>,
+    /// `false` when the local machine doesn't have enough RAM/VRAM to
+    /// load this model. Drives the install button's disabled state and
+    /// the "Not enough memory" hint in the UI.
+    pub fits_in_memory: bool,
+    /// Power-user model (currently the `large` family). Hidden from
+    /// the default catalogue listing — surfaces only when the caller
+    /// explicitly asks for advanced models.
+    pub advanced: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperModelsResponse {
+    /// Catalogue ordered from smallest to largest.
+    pub models: Vec<WhisperModelInfo>,
+    /// Currently active model id (`None` if none installed yet).
+    #[serde(default)]
+    pub active: Option<String>,
+    /// Total bytes occupied by every installed model. Drives the
+    /// "Disk usage" line in the settings page.
+    pub total_disk_bytes: u64,
+    /// Total physical RAM (in MB) the host machine reports. The UI
+    /// shows this next to each model's `requiredMemoryMb` so the user
+    /// understands *why* a model is greyed out.
+    pub system_memory_mb: u32,
 }
 
 #[cfg(test)]

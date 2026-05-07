@@ -66,4 +66,25 @@ impl<R: Runtime> Stt<R> {
             .run_mobile_plugin("requestPermission", ())
             .map_err(Into::into)
     }
+
+    pub fn list_models(&self, _include_advanced: bool) -> crate::Result<WhisperModelsResponse> {
+        Ok(WhisperModelsResponse {
+            models: Vec::new(),
+            active: None,
+            total_disk_bytes: 0,
+            system_memory_mb: 0,
+        })
+    }
+
+    pub fn install_model(&self, _id: String) -> crate::Result<()> {
+        Ok(())
+    }
+
+    pub fn remove_model(&self, _id: String) -> crate::Result<()> {
+        Ok(())
+    }
+
+    pub fn set_active_model(&self, _id: String) -> crate::Result<()> {
+        Ok(())
+    }
 }

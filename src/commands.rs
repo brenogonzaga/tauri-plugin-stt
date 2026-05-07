@@ -65,3 +65,39 @@ pub(crate) async fn remove_listener() -> Result<()> {
     // No-op: mobile plugin manages its own listeners.
     Ok(())
 }
+
+/// List every Whisper model the plugin knows how to install, plus the
+/// active selection and the total disk usage of installed models.
+///
+/// `include_advanced` (default `false`) hides large/oversized models
+/// from the default catalogue. The Voice settings page passes `true`
+/// behind a "Show advanced models" toggle.
+#[command]
+pub(crate) async fn list_models<R: Runtime>(
+    app: AppHandle<R>,
+    include_advanced: Option<bool>,
+) -> Result<WhisperModelsResponse> {
+    app.stt().list_models(include_advanced.unwrap_or(false))
+}
+
+/// Download a Whisper model into the app data directory. Streams
+/// progress events on `stt://download-progress`. The first model
+/// installed becomes active automatically.
+#[command]
+pub(crate) async fn install_model<R: Runtime>(app: AppHandle<R>, id: String) -> Result<()> {
+    app.stt().install_model(id)
+}
+
+/// Delete a previously downloaded Whisper model. Clears the active
+/// selection if the removed model was the active one.
+#[command]
+pub(crate) async fn remove_model<R: Runtime>(app: AppHandle<R>, id: String) -> Result<()> {
+    app.stt().remove_model(id)
+}
+
+/// Set which installed model `start_listening` should load. Returns
+/// `ModelNotInstalled` when the requested model is not on disk.
+#[command]
+pub(crate) async fn set_active_model<R: Runtime>(app: AppHandle<R>, id: String) -> Result<()> {
+    app.stt().set_active_model(id)
+}

@@ -1,4 +1,6 @@
 use serde::{ser::Serializer, Serialize};
+#[cfg(mobile)]
+use tauri::plugin::mobile::PluginInvokeError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -9,10 +11,19 @@ pub enum Error {
 
     #[cfg(mobile)]
     #[error(transparent)]
-    PluginInvoke(#[from] tauri::plugin::mobile::PluginInvokeError),
+    PluginInvoke(#[from] PluginInvokeError),
 
     #[error("STT not available: {0}")]
     NotAvailable(String),
+
+    #[error("No Whisper model installed: {0}")]
+    ModelNotInstalled(String),
+
+    #[error("Unknown Whisper model: {0}")]
+    UnknownModel(String),
+
+    #[error("Insufficient memory: {0}")]
+    InsufficientMemory(String),
 
     #[error("Permission denied: {0}")]
     PermissionDenied(String),

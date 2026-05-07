@@ -51,6 +51,10 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::request_permission,
             commands::register_listener,
             commands::remove_listener,
+            commands::list_models,
+            commands::install_model,
+            commands::remove_model,
+            commands::set_active_model,
         ]);
     }
 
@@ -63,6 +67,10 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_supported_languages,
             commands::check_permission,
             commands::request_permission,
+            commands::list_models,
+            commands::install_model,
+            commands::remove_model,
+            commands::set_active_model,
         ]);
     }
 
