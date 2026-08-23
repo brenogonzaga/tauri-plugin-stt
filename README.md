@@ -95,6 +95,10 @@ Files are fetched from HuggingFace (`ggerganov/whisper.cpp`) and stored under `<
 
 The mobile bridges expose the same JS API surface, but `list_models` returns an empty list and `install_model` / `remove_model` / `set_active_model` / `unload_model` are no-ops: the OS engine has no downloadable model concept. Use `is_available` to gate UI — on iOS/Android it reflects actual recogniser availability.
 
+## Used By
+
+See [USED_BY.md](./USED_BY.md) for projects using this plugin in production.
+
 ## License
 
 MIT
